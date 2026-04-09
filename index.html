@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShopAnalytics – Sales Dashboard</title>
+  <meta name="description"
+    content="ShopAnalytics admin dashboard – track orders, revenue, top products and category performance with real-time Redux state management." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=3" />
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <!-- React 18 (development builds include all hooks like useSyncExternalStore) -->
+  <script src="vendor/react.development.js"></script>
+  <script src="vendor/react-dom.development.js"></script>
+
+  <!-- Recharts -->
+  <script src="vendor/prop-types.min.js"></script>
+  <script src="vendor/Recharts.js"></script>
+
+  <!-- Babel (JSX in browser) -->
+  <script src="vendor/babel.min.js"></script>
+
+  <!-- App data -->
+  <script src="data.js"></script>
+
+  <!-- Store (inline to guarantee order) -->
+  <script>
+    // ============================================================
+    // ShopAnalytics – Minimal Redux Store (vanilla JS, no deps)
+    // ============================================================
+
+    (function () {
+      function createSimpleStore(reducer, initialState) {
+        var state = initialState;
+        var listeners = [];
+
+        return {
+          getState: function () { return state; },
+          dispatch: function (action) {
+            if (typeof action === 'function') {
+              return action(
+                function (a) {
+                  state = reducer(state, a);
+                  listeners.slice().forEach(function (l) { l(); });
+                },
+                function () { return state; }
+              );
+            }
+            state = reducer(state, action);
+            listeners.slice().forEach(function (l) { l(); });
+            return action;
+          },
+          subscribe: function (listener) {
+            listeners.push(listener);
+            return function () {
+              listeners = listeners.filter(function (l) { return l !== listener; });
+            };
+          }
+        };
+      }
+
+      var initialState = {
+        auth: { isLoggedIn: false, user: null, loading: false, error: null },
+        orders: { data: [], loading: false, error: null, search: "", statusFilter: "All", sortBy: "date", sortDir: "desc" },
+        products: { data: [], loading: false, error: null },
+        revenue: { monthly: [], weekly: [], loading: false, error: null, view: "monthly" },
+        categories: { data: [], loading: false, error: null },
+        ui: { activePage: "dashboard", darkMode: true, sidebarOpen: true }
+      };
+
+      function rootReducer(state, action) {
+        if (!state) state = initialState;
+        if (!action) return state;
+        switch (action.type) {
+          case "auth/setLoading":
+            return Object.assign({}, state, { auth: Object.assign({}, state.auth, { loading: action.payload }) });
+          case "auth/loginSuccess":
+            return Object.assign({}, state, { auth: { isLoggedIn: true, user: action.payload, loading: false, error: null } });
+          case "auth/loginFailure":
+            return Object.assign({}, state, { auth: Object.assign({}, state.auth, { loading: false, error: action.payload }) });
+          case "auth/logout":
+            return Object.assign({}, state, { auth: { isLoggedIn: false, user: null, loading: false, error: null }, ui: Object.assign({}, state.ui, { activePage: "dashboard" }) });
+          case "orders/setData":
+            return Object.assign({}, state, { orders: Object.assign({}, state.orders, { data: action.payload, loading: false }) });
+          case "orders/setLoading":
+            return Object.assign({}, state, { orders: Object.assign({}, state.orders, { loading: action.payload }) });
+          case "orders/setSearch":
+            return Object.assign({}, state, { orders: Object.assign({}, state.orders, { search: action.payload }) });
+          case "orders/setStatusFilter":
+            return Object.assign({}, state, { orders: Object.assign({}, state.orders, { statusFilter: action.payload }) });
+          case "orders/setSortBy":
+            var o = state.orders;
+            var newDir = o.sortBy === action.payload ? (o.sortDir === "asc" ? "desc" : "asc") : "asc";
+            return Object.assign({}, state, { orders: Object.assign({}, o, { sortBy: action.payload, sortDir: newDir }) });
+          case "products/setData":
+            return Object.assign({}, state, { products: Object.assign({}, state.products, { data: action.payload, loading: false }) });
+          case "products/setLoading":
+            return Object.assign({}, state, { products: Object.assign({}, state.products, { loading: action.payload }) });
+          case "revenue/setData":
+            return Object.assign({}, state, { revenue: Object.assign({}, state.revenue, { monthly: action.payload.monthly, weekly: action.payload.weekly, loading: false }) });
+          case "revenue/setLoading":
+            return Object.assign({}, state, { revenue: Object.assign({}, state.revenue, { loading: action.payload }) });
+          case "revenue/setView":
+            return Object.assign({}, state, { revenue: Object.assign({}, state.revenue, { view: action.payload }) });
+          case "categories/setData":
+            return Object.assign({}, state, { categories: Object.assign({}, state.categories, { data: action.payload, loading: false }) });
+          case "categories/setLoading":
+            return Object.assign({}, state, { categories: Object.assign({}, state.categories, { loading: action.payload }) });
+          case "ui/setActivePage":
+            return Object.assign({}, state, { ui: Object.assign({}, state.ui, { activePage: action.payload }) });
+          case "ui/toggleDarkMode":
+            var dm = !state.ui.darkMode;
+            document.documentElement.setAttribute("data-theme", dm ? "dark" : "light");
+            return Object.assign({}, state, { ui: Object.assign({}, state.ui, { darkMode: dm }) });
+          case "ui/toggleSidebar":
+            return Object.assign({}, state, { ui: Object.assign({}, state.ui, { sidebarOpen: !state.ui.sidebarOpen }) });
+          default:
+            return state;
+        }
+      }
+
+      var store = createSimpleStore(rootReducer, initialState);
+
+      var shopActions = {
+        login: function (email, password) {
+          return function (dispatch) {
+            dispatch({ type: "auth/setLoading", payload: true });
+            setTimeout(function () {
+              if (email === "admin@shop.com" && password === "admin123") {
+                dispatch({ type: "auth/loginSuccess", payload: { email: email, name: "Shop Admin" } });
+              } else {
+                dispatch({ type: "auth/loginFailure", payload: "Invalid credentials" });
+              }
+            }, 800);
+          };
+        },
+        logout: function () { return { type: "auth/logout" }; },
+        setSearch: function (v) { return { type: "orders/setSearch", payload: v }; },
+        setStatusFilter: function (v) { return { type: "orders/setStatusFilter", payload: v }; },
+        setSortBy: function (v) { return { type: "orders/setSortBy", payload: v }; },
+        setView: function (v) { return { type: "revenue/setView", payload: v }; },
+        setActivePage: function (v) { return { type: "ui/setActivePage", payload: v }; },
+        toggleDarkMode: function () { return { type: "ui/toggleDarkMode" }; },
+        toggleSidebar: function () { return { type: "ui/toggleSidebar" }; },
+        fetchOrders: function () {
+          return function (dispatch) {
+            dispatch({ type: "orders/setLoading", payload: true });
+            setTimeout(function () { dispatch({ type: "orders/setData", payload: SHOP_DATA.orders }); }, 600);
+          };
+        },
+        fetchProducts: function () {
+          return function (dispatch) {
+            dispatch({ type: "products/setLoading", payload: true });
+            setTimeout(function () { dispatch({ type: "products/setData", payload: SHOP_DATA.products }); }, 700);
+          };
+        },
+        fetchRevenue: function () {
+          return function (dispatch) {
+            dispatch({ type: "revenue/setLoading", payload: true });
+            setTimeout(function () { dispatch({ type: "revenue/setData", payload: { monthly: SHOP_DATA.monthlyRevenue, weekly: SHOP_DATA.weeklyRevenue } }); }, 500);
+          };
+        },
+        fetchCategories: function () {
+          return function (dispatch) {
+            dispatch({ type: "categories/setLoading", payload: true });
+            setTimeout(function () { dispatch({ type: "categories/setData", payload: SHOP_DATA.categories }); }, 550);
+          };
+        }
+      };
+
+      window.shopStore = store;
+      window.shopActions = shopActions;
+    })();
+  </script>
+
+  <!-- App logic -->
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+
+</html>
